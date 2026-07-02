@@ -3,6 +3,7 @@ import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { isAllowedMediaUrl } from "../scraper/api.js";
 
 const execFileAsync = promisify(execFile);
 const TEMP_DIR = path.join(os.tmpdir(), "fanding-mcp-videos");
@@ -11,6 +12,9 @@ export async function downloadVideo(
   videoUrl: string,
   cookiesJson: object[]
 ): Promise<string> {
+  if (!isAllowedMediaUrl(videoUrl)) {
+    throw new Error(`허용되지 않은 영상 URL입니다: ${videoUrl}`);
+  }
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const cookiesFile = path.join(TEMP_DIR, `cookies-${Date.now()}.txt`);

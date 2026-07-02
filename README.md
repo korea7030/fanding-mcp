@@ -21,8 +21,10 @@ npx playwright install chromium
 npm run build
 ```
 
-**MCP 클라이언트에 등록**: `mcp-config.json`을 참고해서 Claude Desktop/Claude Code 등의
-MCP 설정에 추가하세요. `args`의 경로를 방금 clone한 절대경로로 바꿔야 합니다.
+**MCP 클라이언트에 등록**: `mcp-config.json`은 이 저장소에 커밋되어 있는 **템플릿**입니다.
+여기에 직접 실제 이메일/비밀번호/API 키를 채우지 마세요 — 저장소에 그대로 커밋/push될 수 있습니다.
+아래 내용을 **Claude Desktop/Claude Code 등 저장소 밖에 있는 실제 설정 파일**에 복사해서
+`args`의 경로만 방금 clone한 절대경로로 바꿔 넣으세요.
 ```json
 {
   "mcpServers": {

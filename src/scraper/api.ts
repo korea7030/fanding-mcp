@@ -285,11 +285,32 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, "_");
 }
 
+const ALLOWED_MEDIA_HOSTS = ["fanding.kr", "cloudfront.net"];
+
+// 파일/영상 URL은 크리에이터가 작성한 포스팅 콘텐츠에서 그대로 뽑아온 것이라 완전히
+// 신뢰할 수 없다. 내부망 주소 등으로 요청을 보내는 SSRF를 막기 위해 fanding.kr 자체와
+// CDN(cloudfront.net) 도메인만 다운로드를 허용한다.
+export function isAllowedMediaUrl(urlString: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  return ALLOWED_MEDIA_HOSTS.some(
+    (host) => url.hostname === host || url.hostname.endsWith(`.${host}`)
+  );
+}
+
 export async function downloadFile(
   file: FandingAttachedFile,
   destinationDir: string,
   cookies: object[]
 ): Promise<string> {
+  if (!isAllowedMediaUrl(file.url)) {
+    throw new Error(`허용되지 않은 다운로드 URL입니다: ${file.url}`);
+  }
   fs.mkdirSync(destinationDir, { recursive: true });
 
   const { statusCode, body } = await request(file.url, {
