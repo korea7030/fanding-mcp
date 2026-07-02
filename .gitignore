@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/sessions/
+data/browser-profiles/
+data/*.db
+.env
+*.log
+.omc/

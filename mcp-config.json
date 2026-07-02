@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fanding": {
+      "command": "node",
+      "args": ["/absolute/path/to/fanding-mcp/dist/index.js"],
+      "env": {
+        "FANDING_EMAIL": "",
+        "FANDING_PASSWORD": "",
+        "OPENAI_API_KEY": ""
+      }
+    }
+  }
+}
