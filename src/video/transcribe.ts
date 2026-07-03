@@ -43,23 +43,31 @@ export async function downloadVideo(
   }
 }
 
+// 기본값은 OpenAI Whisper지만, 엔드포인트/모델을 환경변수로 바꿀 수 있게 해서 Groq 등
+// OpenAI 호환(audio/transcriptions) API를 쓰는 다른 제공자로도 자유롭게 교체할 수 있다.
+const DEFAULT_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1/audio/transcriptions";
+const DEFAULT_TRANSCRIPTION_MODEL = "whisper-1";
+
 export async function transcribeAudio(audioPath: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required for transcription");
+  const apiKey = process.env.TRANSCRIPTION_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("TRANSCRIPTION_API_KEY(또는 OPENAI_API_KEY)가 필요합니다");
+
+  const baseUrl = process.env.TRANSCRIPTION_BASE_URL || DEFAULT_TRANSCRIPTION_BASE_URL;
+  const model = process.env.TRANSCRIPTION_MODEL || DEFAULT_TRANSCRIPTION_MODEL;
 
   const formData = new FormData();
   formData.append("file", new Blob([fs.readFileSync(audioPath)]), path.basename(audioPath));
-  formData.append("model", "whisper-1");
+  formData.append("model", model);
   formData.append("language", "ko");
 
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const response = await fetch(baseUrl, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: formData,
   });
 
   if (!response.ok) {
-    throw new Error(`Whisper API error: ${response.status} ${await response.text()}`);
+    throw new Error(`전사 API 에러 (${baseUrl}): ${response.status} ${await response.text()}`);
   }
 
   const result = (await response.json()) as { text: string };

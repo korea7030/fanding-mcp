@@ -98,37 +98,71 @@ async function reLoginSameMethod(session: Session): Promise<string> {
   }
 }
 
+// index_creator_posts처럼 짧은 시간에 API를 여러 번 연달아 호출하는 경로가 있어,
+// fanding.kr을 과도하게 두들겨서 봇 탐지에 걸리지 않도록 요청 사이 최소 간격을 둔다.
+const MIN_REQUEST_INTERVAL_MS = 300;
+let lastRequestAt = 0;
+
+async function throttle(): Promise<void> {
+  const wait = lastRequestAt + MIN_REQUEST_INTERVAL_MS - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastRequestAt = Date.now();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const MAX_RATE_LIMIT_RETRIES = 3;
+
 async function apiGet<T>(
   path: string,
   session: Session
 ): Promise<T> {
   const attempt = async (s: Session): Promise<T> => {
-    const cookieHeader = buildCookieHeader(s.cookies as object[]);
-    const { statusCode, body } = await request(`${BASE_URL}${path}`, {
-      method: "GET",
-      headers: {
-        accept: "application/json, text/plain, */*",
-        "accept-language": "ko-KR,ko;q=0.9",
-        cookie: cookieHeader,
-        referer: "https://fanding.kr/feeds",
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-      },
-    });
+    for (let retry = 0; ; retry++) {
+      await throttle();
+      const cookieHeader = buildCookieHeader(s.cookies as object[]);
+      const { statusCode, headers, body } = await request(`${BASE_URL}${path}`, {
+        method: "GET",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          "accept-language": "ko-KR,ko;q=0.9",
+          cookie: cookieHeader,
+          referer: "https://fanding.kr/feeds",
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        },
+      });
 
-    const text = await body.text();
+      if (statusCode === 429) {
+        if (retry >= MAX_RATE_LIMIT_RETRIES) {
+          throw new Error("fanding.kr 요청 속도 제한(429)이 계속되어 중단했습니다. 잠시 후 다시 시도해주세요.");
+        }
+        const retryAfterHeader = headers["retry-after"];
+        const retryAfterSec = Number(Array.isArray(retryAfterHeader) ? retryAfterHeader[0] : retryAfterHeader);
+        const backoffMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : 1000 * 2 ** retry;
+        console.error(`[fanding-mcp] 429 응답, ${backoffMs}ms 대기 후 재시도 (${retry + 1}/${MAX_RATE_LIMIT_RETRIES})`);
+        await sleep(backoffMs);
+        continue;
+      }
 
-    if (statusCode === 401 || statusCode === 403) {
-      markExpired(s.account_label);
-      throw new Error("SESSION_EXPIRED");
+      const text = await body.text();
+
+      if (statusCode === 401 || statusCode === 403) {
+        markExpired(s.account_label);
+        throw new Error("SESSION_EXPIRED");
+      }
+
+      const json = JSON.parse(text) as { bIsResult: boolean; sCode: string; aData: T };
+      if (!json.bIsResult) {
+        throw new Error(`API error: ${json.sCode}`);
+      }
+
+      return json.aData;
     }
-
-    const json = JSON.parse(text) as { bIsResult: boolean; sCode: string; aData: T };
-    if (!json.bIsResult) {
-      throw new Error(`API error: ${json.sCode}`);
-    }
-
-    return json.aData;
   };
 
   try {

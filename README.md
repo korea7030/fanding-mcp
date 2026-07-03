@@ -2,6 +2,12 @@
 
 fanding.kr 포스팅/영상 요약, 검색, 실시간 트래킹을 위한 MCP 서버.
 
+> **비공식 도구입니다.** fanding.kr은 서드파티 앱용 공식 API/OAuth를 제공하지 않아서,
+> 이 프로젝트는 실제 브라우저 자동화로 로그인해서 웹에서 보이는 데이터를 가져오는 방식으로
+> 동작합니다. fanding.kr의 이용약관/robots 정책을 위반할 수 있고, 과도하게 사용하면 봇
+> 탐지에 걸려 계정이 제재될 수 있습니다. 개인 사용 목적으로만 쓰고, 사용에 따른 책임은
+> 전적으로 사용자 본인에게 있습니다. fanding.kr 또는 이 프로젝트의 개발자와는 무관합니다.
+
 ## 설치
 
 npm install만으로 끝나지 않고 시스템에 별도로 설치해야 하는 것들이 있습니다.
@@ -106,4 +112,5 @@ API가 세션 만료(401/403)를 감지하면 **같은 로그인 방식으로 �
 npm run build   # tsc
 npm run dev     # tsx src/index.ts
 npm start        # node dist/index.js
+npm test        # node:test (tsx로 실행, 순수 로직 + DB 계층 회귀 테스트)
 ```
