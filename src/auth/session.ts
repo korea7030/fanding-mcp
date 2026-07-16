@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { randomUUID } from "crypto";
-import { DATA_DIR } from "../paths.js";
+import { SESSION_DIR } from "../paths.js";
 
 export type LoginMethod =
   | "naver"
@@ -20,8 +20,6 @@ export interface Session {
   last_validated_at: string;
   status: "active" | "expired";
 }
-
-const SESSION_DIR = process.env.SESSION_DIR ?? path.join(DATA_DIR, "sessions");
 
 function sessionPath(accountLabel: string) {
   return path.join(SESSION_DIR, `${accountLabel}.json`);

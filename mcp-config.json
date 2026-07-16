@@ -1,12 +1,14 @@
 {
   "mcpServers": {
     "fanding": {
-      "command": "node",
-      "args": ["/absolute/path/to/fanding-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@korea7030/fanding-mcp"],
       "env": {
         "FANDING_EMAIL": "",
         "FANDING_PASSWORD": "",
-        "OPENAI_API_KEY": ""
+        "OPENAI_API_KEY": "",
+        "FANDING_DATA_DIR": "",
+        "PLAYWRIGHT_BROWSERS_PATH": ""
       }
     }
   }
