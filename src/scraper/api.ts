@@ -125,10 +125,16 @@ function sleep(ms: number): Promise<void> {
 
 const MAX_RATE_LIMIT_RETRIES = 3;
 
+interface ApiGetOptions {
+  autoRelogin?: boolean;
+}
+
 async function apiGet<T>(
   path: string,
-  session: Session
+  session: Session,
+  options: ApiGetOptions = {}
 ): Promise<T> {
+  const autoRelogin = options.autoRelogin ?? true;
   const attempt = async (s: Session): Promise<T> => {
     for (let retry = 0; ; retry++) {
       await throttle();
@@ -178,7 +184,7 @@ async function apiGet<T>(
   try {
     return await attempt(session);
   } catch (err) {
-    if (!(err instanceof Error) || err.message !== "SESSION_EXPIRED") throw err;
+    if (!(err instanceof Error) || err.message !== "SESSION_EXPIRED" || !autoRelogin) throw err;
 
     console.error(`[fanding-mcp] 세션 만료 감지, ${session.login_method} 방식으로 자동 재로그인 시도`);
     const newLabel = await reLoginSameMethod(session);
@@ -190,14 +196,16 @@ async function apiGet<T>(
 
 export async function fetchPost(
   postNo: number,
-  accountLabel?: string
+  accountLabel?: string,
+  options: ApiGetOptions = {}
 ): Promise<FandingPost> {
   const session = getActiveSession(accountLabel);
   if (!session) throw new Error("No active session. Run refresh_session first.");
 
   const data = await apiGet<{ oPostData: FandingPost }>(
     `/post?iPostNo=${postNo}`,
-    session
+    session,
+    options
   );
   return data.oPostData;
 }
@@ -206,11 +214,13 @@ export async function fetchPost(
 export async function fetchRelatedList(
   postNo: number,
   limit: number,
-  session: Session
+  session: Session,
+  options: ApiGetOptions = {}
 ): Promise<FandingListItem[]> {
   const data = await apiGet<{ aPostList: FandingListItem[] }>(
     `/post/related_list?iLimit=${limit}&iPostNo=${postNo}`,
-    session
+    session,
+    options
   );
   return data.aPostList ?? [];
 }
@@ -228,13 +238,49 @@ export interface FandingChannelSection {
 // 크리에이터 홈 섹션 (최신 포스팅 목록 + 총 갯수 포함)
 export async function fetchChannelSection(
   memberUrl: string,
-  session: Session
+  session: Session,
+  options: ApiGetOptions = {}
 ): Promise<FandingChannelSection[]> {
   const data = await apiGet<{ iTotalCount: number; aSectionList: FandingChannelSection[] }>(
     `/channel/section?sMemberUrl=${memberUrl}&sTab=home`,
-    session
+    session,
+    options
   );
   return data.aSectionList ?? [];
+}
+
+export async function fetchRecentPostsForCreator(
+  memberUrl: string,
+  limit: number,
+  session: Session,
+  options: ApiGetOptions = {}
+): Promise<FandingListItem[]> {
+  const sections = await fetchChannelSection(memberUrl, session, options);
+  const newSection = sections.find((s) => s.sType === "post_new");
+  const latestPosts = newSection?.aSectionItem?.aPostList ?? [];
+  if (latestPosts.length === 0 || limit <= 0) return [];
+
+  const all = new Map<number, FandingListItem>();
+  latestPosts.forEach((p) => all.set(p.iPostNo, p));
+
+  let pivotPostNo = Math.min(...latestPosts.map((p) => p.iPostNo));
+  while (all.size < limit) {
+    const batch = await fetchRelatedList(pivotPostNo, Math.min(20, limit - all.size), session, options);
+    if (batch.length === 0) break;
+
+    let added = 0;
+    for (const p of batch) {
+      if (!all.has(p.iPostNo)) {
+        all.set(p.iPostNo, p);
+        added++;
+      }
+    }
+    if (added === 0) break;
+
+    pivotPostNo = Math.min(...batch.map((p) => p.iPostNo));
+  }
+
+  return Array.from(all.values()).sort((a, b) => b.iPostNo - a.iPostNo).slice(0, limit);
 }
 
 // related_list 역방향 순회로 전체 포스팅 수집
