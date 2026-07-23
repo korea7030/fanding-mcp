@@ -60,6 +60,16 @@ export interface FandingListItem {
   iViewCount: number;
   iDuration: number | null;
   iCollectionNo: number | null;
+  sCollectionTitle?: string | null;
+  iCollectionPostOrder?: number | null;
+  iCollectionPostCount?: number | null;
+  iPostCount?: number | null;
+  aCollectionData?: {
+    iCollectionNo?: number | null;
+    sCollectionTitle?: string | null;
+    iCollectionPostOrder?: number | null;
+    iPostCount?: number | null;
+  } | null;
   aCreator: {
     iCreatorNo: number;
     sNickname: string;

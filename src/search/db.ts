@@ -21,9 +21,33 @@ export interface Post {
   reply_count: number;
   duration: number;     // seconds
   has_video: number;
+  collection_no: number | null;
   collection_title: string | null;
+  collection_post_order: number | null;
+  collection_post_count: number | null;
   summary: string | null;
   indexed_at: string;
+}
+
+export interface Series {
+  collection_no: number;
+  collection_title: string | null;
+  creator_no: number;
+  creator_url: string;
+  post_count: number;
+  indexed_post_count: number;
+  latest_published_at: string;
+}
+
+export interface SeriesPostFilters {
+  query?: string;
+  date?: string;
+  has_video?: boolean;
+  min_like?: number;
+  min_view?: number;
+  order?: "latest" | "oldest" | "like" | "view" | "reply" | "series";
+  limit?: number;
+  offset?: number;
 }
 
 let _db: Database.Database | null = null;
@@ -55,7 +79,10 @@ function initSchema(db: Database.Database): void {
       reply_count INTEGER DEFAULT 0,
       duration INTEGER DEFAULT 0,
       has_video INTEGER DEFAULT 0,
+      collection_no INTEGER,
       collection_title TEXT,
+      collection_post_order INTEGER,
+      collection_post_count INTEGER,
       summary TEXT,
       indexed_at TEXT NOT NULL
     );
@@ -63,6 +90,7 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_posts_published_at ON posts(published_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_creator_no ON posts(creator_no);
     CREATE INDEX IF NOT EXISTS idx_posts_like_count ON posts(like_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_collection_no ON posts(collection_no);
 
     CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
       id UNINDEXED,
@@ -100,6 +128,22 @@ function initSchema(db: Database.Database): void {
     DROP TRIGGER IF EXISTS posts_au;
     DROP TRIGGER IF EXISTS posts_ad;
   `);
+
+  ensureColumn(db, "posts", "collection_no", "INTEGER");
+  ensureColumn(db, "posts", "collection_post_order", "INTEGER");
+  ensureColumn(db, "posts", "collection_post_count", "INTEGER");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_posts_collection_no ON posts(collection_no);");
+}
+
+function ensureColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((c) => c.name === column)) return;
+  db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
 function syncFtsRow(db: Database.Database, id: string): void {
@@ -141,7 +185,9 @@ export function upsertPost(post: Post): void {
       title=@title, content=@content, content_html=@content_html,
       like_count=@like_count, view_count=@view_count,
       reply_count=@reply_count, summary=@summary,
-      collection_title=@collection_title
+      collection_no=@collection_no, collection_title=@collection_title,
+      collection_post_order=@collection_post_order,
+      collection_post_count=@collection_post_count
     WHERE id=@id
   `
     )
@@ -153,11 +199,13 @@ export function upsertPost(post: Post): void {
       INSERT INTO posts (
         id, post_no, title, content, content_html, author, creator_no, creator_url,
         published_at, url, like_count, view_count, reply_count, duration,
-        has_video, collection_title, summary, indexed_at
+        has_video, collection_no, collection_title, collection_post_order,
+        collection_post_count, summary, indexed_at
       ) VALUES (
         @id, @post_no, @title, @content, @content_html, @author, @creator_no, @creator_url,
         @published_at, @url, @like_count, @view_count, @reply_count, @duration,
-        @has_video, @collection_title, @summary, @indexed_at
+        @has_video, @collection_no, @collection_title, @collection_post_order,
+        @collection_post_count, @summary, @indexed_at
       )
     `
     ).run(post);
@@ -209,6 +257,80 @@ export function getTopPosts(by: "like" | "view" | "reply" = "like", limit = 20):
   return db.prepare(
     `SELECT * FROM posts ORDER BY ${col} DESC LIMIT ?`
   ).all(limit) as Post[];
+}
+
+export function listSeries(): Series[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      collection_no,
+      COALESCE(MAX(collection_title), NULL) AS collection_title,
+      creator_no,
+      creator_url,
+      COALESCE(MAX(collection_post_count), COUNT(*)) AS post_count,
+      COUNT(*) AS indexed_post_count,
+      MAX(published_at) AS latest_published_at
+    FROM posts
+    WHERE collection_no IS NOT NULL
+    GROUP BY collection_no, creator_no, creator_url
+    ORDER BY latest_published_at DESC
+  `).all() as Series[];
+}
+
+export function getSeriesPosts(
+  collectionNo: number,
+  filters: SeriesPostFilters = {}
+): Post[] {
+  const db = getDb();
+  const clauses = ["p.collection_no = ?"];
+  const params: unknown[] = [collectionNo];
+
+  if (filters.query?.trim()) {
+    clauses.push("p.id IN (SELECT id FROM posts_fts WHERE posts_fts MATCH ?)");
+    params.push(filters.query.trim());
+  }
+  if (filters.date?.trim()) {
+    clauses.push("p.published_at LIKE ?");
+    params.push(`${filters.date.trim()}%`);
+  }
+  if (filters.has_video !== undefined) {
+    clauses.push("p.has_video = ?");
+    params.push(filters.has_video ? 1 : 0);
+  }
+  if (filters.min_like !== undefined) {
+    clauses.push("p.like_count >= ?");
+    params.push(filters.min_like);
+  }
+  if (filters.min_view !== undefined) {
+    clauses.push("p.view_count >= ?");
+    params.push(filters.min_view);
+  }
+
+  const orderBy = (() => {
+    switch (filters.order ?? "series") {
+      case "latest":
+        return "p.published_at DESC";
+      case "oldest":
+        return "p.published_at ASC";
+      case "like":
+        return "p.like_count DESC, p.published_at DESC";
+      case "view":
+        return "p.view_count DESC, p.published_at DESC";
+      case "reply":
+        return "p.reply_count DESC, p.published_at DESC";
+      case "series":
+        return "p.collection_post_order ASC, p.published_at ASC";
+    }
+  })();
+
+  params.push(filters.limit ?? 20, filters.offset ?? 0);
+  return db.prepare(`
+    SELECT p.*
+    FROM posts p
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY ${orderBy}
+    LIMIT ? OFFSET ?
+  `).all(...params) as Post[];
 }
 
 export function getTrackerState(key: string): string | null {

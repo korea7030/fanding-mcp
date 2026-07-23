@@ -6,7 +6,15 @@ import { listSessions, deleteSession, getActiveSession, type LoginMethod } from 
 import { fetchPost, fetchAllPostsForCreator, extractVideoUrl, extractAttachedFiles, downloadFile } from "./scraper/api.js";
 import { mapApiPostToDb, mapListItemToDb } from "./scraper/mapper.js";
 import { transcribeVideo } from "./video/transcribe.js";
-import { searchPosts, getRecentPosts, getTopPosts, upsertPost, upsertVideoTranscript } from "./search/db.js";
+import {
+  searchPosts,
+  getRecentPosts,
+  getTopPosts,
+  listSeries,
+  getSeriesPosts,
+  upsertPost,
+  upsertVideoTranscript,
+} from "./search/db.js";
 import { startTracking, stopTracking, listTracking } from "./tracker/poller.js";
 import { ensureDataDirs } from "./paths.js";
 
@@ -277,6 +285,71 @@ server.tool(
       likes: p.like_count,
       views: p.view_count,
       replies: p.reply_count,
+      url: p.url,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool("list_series", "저장된 포스팅 DB에서 시리즈 목록을 조회합니다", {}, async () => {
+  const series = listSeries();
+  if (series.length === 0)
+    return { content: [{ type: "text", text: "저장된 시리즈가 없습니다." }] };
+
+  const result = series.map((s) => ({
+    collection_no: s.collection_no,
+    title: s.collection_title,
+    creator_no: s.creator_no,
+    creator_url: s.creator_url,
+    post_count: s.post_count,
+    indexed_post_count: s.indexed_post_count,
+    latest_published_at: s.latest_published_at,
+  }));
+  return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+});
+
+server.tool(
+  "get_series_posts",
+  "특정 시리즈(collection_no) 안에서 저장된 포스팅을 조건별로 조회합니다",
+  {
+    collection_no: z.number().describe("시리즈 번호"),
+    query: z.string().optional().describe("시리즈 안에서 검색할 키워드"),
+    date: z.string().optional().describe("게시일 필터. YYYY-MM-DD 또는 published_at prefix"),
+    has_video: z.boolean().optional().describe("영상 포함 여부"),
+    min_like: z.number().optional().describe("최소 좋아요 수"),
+    min_view: z.number().optional().describe("최소 조회수"),
+    order: z.enum(["series", "latest", "oldest", "like", "view", "reply"]).default("series")
+      .describe("정렬 기준. series는 시리즈 순서 기준"),
+    limit: z.number().default(20),
+    offset: z.number().default(0),
+  },
+  async ({ collection_no, query, date, has_video, min_like, min_view, order, limit, offset }) => {
+    const posts = getSeriesPosts(collection_no, {
+      query,
+      date,
+      has_video,
+      min_like,
+      min_view,
+      order,
+      limit,
+      offset,
+    });
+    if (posts.length === 0)
+      return { content: [{ type: "text", text: "조회 결과가 없습니다." }] };
+
+    const result = posts.map((p) => ({
+      post_no: p.post_no,
+      title: p.title,
+      author: p.author,
+      published_at: p.published_at,
+      likes: p.like_count,
+      views: p.view_count,
+      replies: p.reply_count,
+      has_video: p.has_video === 1,
+      collection_no: p.collection_no,
+      collection_title: p.collection_title,
+      collection_post_order: p.collection_post_order,
+      collection_post_count: p.collection_post_count,
       url: p.url,
     }));
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };

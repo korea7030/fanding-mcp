@@ -8,6 +8,7 @@ export function mapApiPostToDb(
   const postNo = post.iPostNo;
   const creatorUrl = post.aCreatorInfo.sCreatorUrl;
   const videoFile = post.aFileList?.find((f) => f.sType === "video");
+  const collection = post.aCollectionData;
 
   return {
     id: String(postNo),
@@ -25,7 +26,10 @@ export function mapApiPostToDb(
     reply_count: post.iReplyCount ?? 0,
     duration: post.iDuration ?? 0,
     has_video: videoFile || post.aMediaList?.sVideoUploadUrl ? 1 : 0,
-    collection_title: post.aCollectionData?.sCollectionTitle ?? null,
+    collection_no: collection?.iCollectionNo ?? null,
+    collection_title: collection?.sCollectionTitle ?? null,
+    collection_post_order: collection?.iCollectionPostOrder ?? null,
+    collection_post_count: collection?.iPostCount ?? null,
     summary,
     indexed_at: new Date().toISOString(),
   };
@@ -33,6 +37,8 @@ export function mapApiPostToDb(
 
 export function mapListItemToDb(item: FandingListItem): Post {
   const creatorUrl = item.aCreator.sCreatorUrl;
+  const collection = item.aCollectionData;
+  const collectionNo = collection?.iCollectionNo ?? item.iCollectionNo ?? null;
   return {
     id: String(item.iPostNo),
     post_no: item.iPostNo,
@@ -49,7 +55,10 @@ export function mapListItemToDb(item: FandingListItem): Post {
     reply_count: item.iReplyCount ?? 0,
     duration: item.iDuration ?? 0,
     has_video: item.sContentType === "M" && (item.iDuration ?? 0) > 0 ? 1 : 0,
-    collection_title: null,
+    collection_no: collectionNo,
+    collection_title: collection?.sCollectionTitle ?? item.sCollectionTitle ?? null,
+    collection_post_order: collection?.iCollectionPostOrder ?? item.iCollectionPostOrder ?? null,
+    collection_post_count: collection?.iPostCount ?? item.iCollectionPostCount ?? item.iPostCount ?? null,
     summary: null,
     indexed_at: new Date().toISOString(),
   };

@@ -22,7 +22,10 @@ function makePost(overrides: Partial<Post> = {}): Post {
     reply_count: 1,
     duration: 0,
     has_video: 0,
+    collection_no: null,
     collection_title: null,
+    collection_post_order: null,
+    collection_post_count: null,
     summary: null,
     indexed_at: "2026-01-01",
     ...overrides,
@@ -76,6 +79,94 @@ test("getTopPosts: like/view/reply 기준 정렬", async () => {
 
   const byView = getTopPosts("view", 10);
   assert.equal(byView[0].post_no, 1);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("listSeries: 저장된 시리즈 목록과 인덱싱 수 반환", async () => {
+  const { upsertPost, listSeries, tmpDir } = await freshDb();
+
+  upsertPost(makePost({
+    id: "101",
+    post_no: 101,
+    collection_no: 300,
+    collection_title: "시리즈 A",
+    collection_post_order: 1,
+    collection_post_count: 3,
+  }));
+  upsertPost(makePost({
+    id: "102",
+    post_no: 102,
+    collection_no: 300,
+    collection_title: "시리즈 A",
+    collection_post_order: 2,
+    collection_post_count: 3,
+    published_at: "2026-01-02",
+  }));
+  upsertPost(makePost({ id: "103", post_no: 103, collection_no: null }));
+
+  const series = listSeries();
+  const target = series.find((s) => s.collection_no === 300);
+  assert.ok(target);
+  assert.equal(target.post_count, 3);
+  assert.equal(target.indexed_post_count, 2);
+  assert.equal(target.latest_published_at, "2026-01-02");
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("getSeriesPosts: 시리즈 안에서 query/date/영상/랭킹 필터와 정렬 적용", async () => {
+  const { upsertPost, getSeriesPosts, tmpDir } = await freshDb();
+
+  upsertPost(makePost({
+    id: "201",
+    post_no: 201,
+    title: "AI 첫 강의",
+    content: "머신러닝 기초",
+    collection_no: 500,
+    collection_post_order: 2,
+    published_at: "2026-01-01T10:00:00",
+    like_count: 10,
+    view_count: 100,
+    has_video: 1,
+  }));
+  upsertPost(makePost({
+    id: "202",
+    post_no: 202,
+    title: "AI 둘째 강의",
+    content: "딥러닝 심화",
+    collection_no: 500,
+    collection_post_order: 1,
+    published_at: "2026-01-02T10:00:00",
+    like_count: 50,
+    view_count: 20,
+    has_video: 0,
+  }));
+  upsertPost(makePost({
+    id: "203",
+    post_no: 203,
+    title: "다른 시리즈",
+    content: "머신러닝",
+    collection_no: 400,
+    collection_post_order: 1,
+    published_at: "2026-01-01T10:00:00",
+    like_count: 100,
+    view_count: 1000,
+    has_video: 1,
+  }));
+
+  const seriesOrder = getSeriesPosts(500, { order: "series" });
+  assert.deepEqual(seriesOrder.map((p) => p.post_no), [202, 201]);
+
+  const filtered = getSeriesPosts(500, {
+    query: "머신러닝",
+    date: "2026-01-01",
+    has_video: true,
+    min_like: 5,
+    min_view: 50,
+    order: "like",
+  });
+  assert.deepEqual(filtered.map((p) => p.post_no), [201]);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
