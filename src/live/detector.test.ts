@@ -86,10 +86,46 @@ test("filterLiveSeriesTitleContainsPosts: include_unseen_only와 previous baseli
   assert.equal(result.previous_seen_post_no, 10);
 });
 
+test("filterLiveSeriesTitleContainsPosts: since_post_no는 저장 state보다 우선", () => {
+  const result = filterLiveSeriesTitleContainsPosts(
+    [
+      makeItem({ iPostNo: 12, sTitle: "긴급 A" }),
+      makeItem({ iPostNo: 20, sTitle: "긴급 B" }),
+    ],
+    {
+      member_url: "orlandokim",
+      collection_no: 100,
+      title_prefix: "긴급",
+      include_unseen_only: true,
+      since_post_no: 15,
+    },
+    100
+  );
+
+  assert.deepEqual(result.posts.map((post) => post.post_no), [20]);
+  assert.equal(result.previous_seen_post_no, 15);
+});
+
+test("filterLiveSeriesTitleContainsPosts: ignore_state=true면 저장 state 무시", () => {
+  const result = filterLiveSeriesTitleContainsPosts(
+    [makeItem({ iPostNo: 12, sTitle: "긴급 A" })],
+    {
+      member_url: "orlandokim",
+      collection_no: 100,
+      title_prefix: "긴급",
+      include_unseen_only: true,
+      ignore_state: true,
+    },
+    100
+  );
+
+  assert.deepEqual(result.posts.map((post) => post.post_no), [12]);
+  assert.equal(result.previous_seen_post_no, undefined);
+});
+
 test("defaultLiveSeriesTitleContainsStateKey: contains 정책 key 사용", () => {
   assert.equal(
     defaultLiveSeriesTitleContainsStateKey("orlandokim", 100, "긴급"),
     "series_title_contains:orlandokim:100:긴급"
   );
 });
-

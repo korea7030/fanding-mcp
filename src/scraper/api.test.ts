@@ -3,22 +3,23 @@ import assert from "node:assert/strict";
 import { isAllowedMediaUrl, extractAttachedFiles, extractVideoUrl, stripHtml } from "./api.js";
 import type { FandingPost } from "./api.js";
 
-test("isAllowedMediaUrl: fanding.kr/cloudfront.net https만 허용 (SSRF 가드 회귀 테스트)", () => {
-  assert.equal(isAllowedMediaUrl("https://dcjnmis8jxmbl.cloudfront.net/file.pdf"), true);
-  assert.equal(isAllowedMediaUrl("https://fanding.kr/x"), true);
-  assert.equal(isAllowedMediaUrl("https://www.fanding.kr/x"), true);
+test("isAllowedMediaUrl: Fanding CDN exact host만 허용 (SSRF 가드 회귀 테스트)", () => {
+  assert.equal(isAllowedMediaUrl("https://video.cdn.fanding.com/file.mp4"), true);
+  assert.equal(isAllowedMediaUrl("https://file.cdn.fanding.com/file.pdf"), true);
+  assert.equal(isAllowedMediaUrl("https://cdn.fanding.com/file.pdf"), true);
 
   assert.equal(isAllowedMediaUrl("http://169.254.169.254/latest/meta-data/"), false, "내부 IP 차단");
   assert.equal(isAllowedMediaUrl("https://evil.com/steal"), false, "무관한 도메인 차단");
-  assert.equal(isAllowedMediaUrl("https://fanding.kr.evil.com/steal"), false, "도메인 스푸핑 차단");
-  assert.equal(isAllowedMediaUrl("https://cloudfront.net.evil.com/steal"), false, "도메인 스푸핑 차단");
-  assert.equal(isAllowedMediaUrl("http://dcjnmis8jxmbl.cloudfront.net/insecure"), false, "http 차단");
+  assert.equal(isAllowedMediaUrl("https://fanding.com.evil.com/steal"), false, "도메인 스푸핑 차단");
+  assert.equal(isAllowedMediaUrl("https://x.video.cdn.fanding.com/steal"), false, "하위 도메인 확장 차단");
+  assert.equal(isAllowedMediaUrl("https://dcjnmis8jxmbl.cloudfront.net/file.pdf"), false, "범용 cloudfront 차단");
+  assert.equal(isAllowedMediaUrl("http://video.cdn.fanding.com/insecure"), false, "http 차단");
   assert.equal(isAllowedMediaUrl("not a url"), false);
 });
 
 test("extractAttachedFiles: fd-editor-file 링크 파싱", () => {
   const html =
-    '<a class="fd-editor-file" href="https://dcjnmis8jxmbl.cloudfront.net/f.pdf" data-fd-name="my file.pdf" data-fd-size="12345"></a>';
+    '<a class="fd-editor-file" href="https://file.cdn.fanding.com/f.pdf" data-fd-name="my file.pdf" data-fd-size="12345"></a>';
   const files = extractAttachedFiles({ sContent: html } as FandingPost);
   assert.equal(files.length, 1);
   assert.equal(files[0].name, "my file.pdf");

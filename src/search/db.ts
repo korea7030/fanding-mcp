@@ -61,6 +61,30 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+function postColumnSet(db: Database.Database): Set<string> {
+  return new Set(
+    (db.prepare("PRAGMA table_info(posts)").all() as { name: string }[]).map((c) => c.name)
+  );
+}
+
+function hasPostColumn(db: Database.Database, column: string): boolean {
+  return postColumnSet(db).has(column);
+}
+
+function normalizePostRow(row: Partial<Post>): Post {
+  return {
+    ...row,
+    collection_no: row.collection_no ?? null,
+    collection_title: row.collection_title ?? null,
+    collection_post_order: row.collection_post_order ?? null,
+    collection_post_count: row.collection_post_count ?? null,
+  } as Post;
+}
+
+function normalizePostRows(rows: Partial<Post>[]): Post[] {
+  return rows.map(normalizePostRow);
+}
+
 function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS posts (
@@ -178,35 +202,43 @@ function syncFtsRow(db: Database.Database, id: string): void {
 
 export function upsertPost(post: Post): void {
   const db = getDb();
+  const columns = postColumnSet(db);
+  const collectionUpdateParts = [
+    columns.has("collection_no") ? "collection_no=@collection_no" : null,
+    columns.has("collection_title") ? "collection_title=@collection_title" : null,
+    columns.has("collection_post_order") ? "collection_post_order=@collection_post_order" : null,
+    columns.has("collection_post_count") ? "collection_post_count=@collection_post_count" : null,
+  ].filter((part): part is string => part !== null);
+  const collectionUpdateSql = collectionUpdateParts.length > 0
+    ? `,\n      ${collectionUpdateParts.join(",\n      ")}`
+    : "";
   const result = db
     .prepare(
       `
     UPDATE posts SET
       title=@title, content=@content, content_html=@content_html,
       like_count=@like_count, view_count=@view_count,
-      reply_count=@reply_count, summary=@summary,
-      collection_no=@collection_no, collection_title=@collection_title,
-      collection_post_order=@collection_post_order,
-      collection_post_count=@collection_post_count
+      reply_count=@reply_count, summary=@summary${collectionUpdateSql}
     WHERE id=@id
   `
     )
     .run(post);
 
   if (result.changes === 0) {
+    const insertColumns = [
+      "id", "post_no", "title", "content", "content_html", "author", "creator_no", "creator_url",
+      "published_at", "url", "like_count", "view_count", "reply_count", "duration", "has_video",
+      columns.has("collection_no") ? "collection_no" : null,
+      columns.has("collection_title") ? "collection_title" : null,
+      columns.has("collection_post_order") ? "collection_post_order" : null,
+      columns.has("collection_post_count") ? "collection_post_count" : null,
+      "summary", "indexed_at",
+    ].filter((column): column is string => column !== null);
+    const insertValues = insertColumns.map((column) => `@${column}`);
     db.prepare(
       `
-      INSERT INTO posts (
-        id, post_no, title, content, content_html, author, creator_no, creator_url,
-        published_at, url, like_count, view_count, reply_count, duration,
-        has_video, collection_no, collection_title, collection_post_order,
-        collection_post_count, summary, indexed_at
-      ) VALUES (
-        @id, @post_no, @title, @content, @content_html, @author, @creator_no, @creator_url,
-        @published_at, @url, @like_count, @view_count, @reply_count, @duration,
-        @has_video, @collection_no, @collection_title, @collection_post_order,
-        @collection_post_count, @summary, @indexed_at
-      )
+      INSERT INTO posts (${insertColumns.join(", ")})
+      VALUES (${insertValues.join(", ")})
     `
     ).run(post);
   }
@@ -235,39 +267,44 @@ export function upsertVideoTranscript(
 
 export function searchPosts(query: string, limit = 20, offset = 0): Post[] {
   const db = getDb();
-  return db.prepare(`
+  return normalizePostRows(db.prepare(`
     SELECT p.* FROM posts_fts f
     JOIN posts p ON p.id = f.id
     WHERE posts_fts MATCH ?
     ORDER BY p.published_at DESC
     LIMIT ? OFFSET ?
-  `).all(query, limit, offset) as Post[];
+  `).all(query, limit, offset) as Partial<Post>[]);
 }
 
 export function getRecentPosts(limit = 20, offset = 0): Post[] {
   const db = getDb();
-  return db.prepare(
+  return normalizePostRows(db.prepare(
     "SELECT * FROM posts ORDER BY published_at DESC LIMIT ? OFFSET ?"
-  ).all(limit, offset) as Post[];
+  ).all(limit, offset) as Partial<Post>[]);
 }
 
 export function getTopPosts(by: "like" | "view" | "reply" = "like", limit = 20): Post[] {
   const col = by === "like" ? "like_count" : by === "view" ? "view_count" : "reply_count";
   const db = getDb();
-  return db.prepare(
+  return normalizePostRows(db.prepare(
     `SELECT * FROM posts ORDER BY ${col} DESC LIMIT ?`
-  ).all(limit) as Post[];
+  ).all(limit) as Partial<Post>[]);
 }
 
 export function listSeries(): Series[] {
   const db = getDb();
+  const columns = postColumnSet(db);
+  if (!columns.has("collection_no")) return [];
+  const postCountExpr = columns.has("collection_post_count")
+    ? "COALESCE(MAX(collection_post_count), COUNT(*))"
+    : "COUNT(*)";
   return db.prepare(`
     SELECT
       collection_no,
       COALESCE(MAX(collection_title), NULL) AS collection_title,
       creator_no,
       creator_url,
-      COALESCE(MAX(collection_post_count), COUNT(*)) AS post_count,
+      ${postCountExpr} AS post_count,
       COUNT(*) AS indexed_post_count,
       MAX(published_at) AS latest_published_at
     FROM posts
@@ -282,6 +319,8 @@ export function getSeriesPosts(
   filters: SeriesPostFilters = {}
 ): Post[] {
   const db = getDb();
+  const columns = postColumnSet(db);
+  if (!columns.has("collection_no")) return [];
   const clauses = ["p.collection_no = ?"];
   const params: unknown[] = [collectionNo];
 
@@ -319,18 +358,20 @@ export function getSeriesPosts(
       case "reply":
         return "p.reply_count DESC, p.published_at DESC";
       case "series":
-        return "p.collection_post_order ASC, p.published_at ASC";
+        return columns.has("collection_post_order")
+          ? "p.collection_post_order ASC, p.published_at ASC"
+          : "p.published_at ASC";
     }
   })();
 
   params.push(filters.limit ?? 20, filters.offset ?? 0);
-  return db.prepare(`
+  return normalizePostRows(db.prepare(`
     SELECT p.*
     FROM posts p
     WHERE ${clauses.join(" AND ")}
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
-  `).all(...params) as Post[];
+  `).all(...params) as Partial<Post>[]);
 }
 
 export function getTrackerState(key: string): string | null {

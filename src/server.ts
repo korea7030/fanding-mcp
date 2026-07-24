@@ -135,7 +135,11 @@ server.tool(
     const post = mapApiPostToDb(apiPost, null);
 
     if (apiPost.aAuthInfo?.sIsLock === "T") {
-      upsertPost(post);
+      try {
+        upsertPost(post);
+      } catch (err) {
+        console.error(`[fanding-mcp] locked post DB upsert failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return {
         content: [
           {
@@ -157,12 +161,28 @@ server.tool(
     const attachedFiles = extractAttachedFiles(apiPost);
 
     let transcript: string | null = null;
+    let videoStatus: { video_status: "failed"; video_error: string } | null = null;
     if (videoUrl && include_video) {
-      transcript = await transcribeVideo(videoUrl, session.cookies as object[]);
-      upsertVideoTranscript(String(post_no), videoUrl, transcript, transcript.slice(0, 500));
-      post.summary = transcript.slice(0, 500);
+      try {
+        transcript = await transcribeVideo(videoUrl, session.cookies as object[]);
+        try {
+          upsertVideoTranscript(String(post_no), videoUrl, transcript, transcript.slice(0, 500));
+          post.summary = transcript.slice(0, 500);
+        } catch (err) {
+          console.error(`[fanding-mcp] video transcript DB upsert failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } catch (err) {
+        videoStatus = {
+          video_status: "failed",
+          video_error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
-    upsertPost(post);
+    try {
+      upsertPost(post);
+    } catch (err) {
+      console.error(`[fanding-mcp] post DB upsert failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     const lines: string[] = [
       `**제목**: ${post.title}`,
@@ -180,6 +200,8 @@ server.tool(
     );
     if (transcript) {
       lines.push("", "**영상 전사**:", transcript);
+    } else if (videoStatus) {
+      lines.push("", "**영상 처리 상태**:", JSON.stringify(videoStatus, null, 2));
     } else if (videoUrl && !include_video) {
       lines.push("", "(이 포스팅에는 영상이 있습니다. include_video:false라 전사는 생략했습니다)");
     }
@@ -400,7 +422,8 @@ server.tool(
     state_key: z.string().optional().describe("중복 감지 state key"),
     since_post_no: z.number().optional().describe("수동 baseline. 이 번호보다 큰 matching post를 new로 표시합니다."),
     update_state: z.boolean().default(true).describe("matching post 중 최대 post_no를 state에 저장할지 여부"),
-    include_unseen_only: z.boolean().default(true).describe("true면 아직 보지 않은 matching post만 반환합니다"),
+    include_unseen_only: z.boolean().default(true).describe("true면 아직 보지 않은 matching post만 반환합니다. false면 매칭 전체를 반환하며 is_new로 신규 여부를 표시합니다."),
+    ignore_state: z.boolean().default(false).describe("저장된 state를 무시하고 since_post_no 또는 0을 기준으로 신규 여부를 계산합니다."),
     case_sensitive: z.boolean().default(false).describe("제목 포함 검사 대소문자 구분 여부"),
     trim_title: z.boolean().default(true).describe("제목/검색어 앞뒤 공백 제거 여부"),
     normalize_space: z.boolean().default(true).describe("연속 공백을 단일 공백으로 정규화할지 여부"),
@@ -419,6 +442,7 @@ server.tool(
     since_post_no,
     update_state,
     include_unseen_only,
+    ignore_state,
     case_sensitive,
     trim_title,
     normalize_space,
@@ -462,7 +486,7 @@ server.tool(
     try {
       const state = readLivePrefixState();
       const previousLastSeenPostNo = state[key]?.last_seen_post_no;
-      const stateUpdateBaseline = Math.max(previousLastSeenPostNo ?? 0, since_post_no ?? 0);
+      const stateUpdateBaseline = since_post_no ?? (ignore_state ? 0 : previousLastSeenPostNo ?? 0);
       const livePosts = await fetchRecentPostsForCreator(
         member_url,
         Math.max(1, Math.min(limit, 100)),
@@ -480,6 +504,7 @@ server.tool(
           since_post_no,
           update_state,
           include_unseen_only,
+          ignore_state,
           case_sensitive,
           trim_title,
           normalize_space,

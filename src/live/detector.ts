@@ -12,6 +12,7 @@ export interface LiveSeriesTitleContainsOptions {
   since_post_no?: number;
   update_state?: boolean;
   include_unseen_only?: boolean;
+  ignore_state?: boolean;
   case_sensitive?: boolean;
   trim_title?: boolean;
   normalize_space?: boolean;
@@ -109,7 +110,7 @@ export function filterLiveSeriesTitleContainsPosts(
   previousLastSeenPostNo?: number
 ): Omit<LiveSeriesTitleContainsResult, "checked_at" | "state"> {
   const normalizedNeedle = normalizeTitleForContains(options.title_prefix, options);
-  const baseline = Math.max(previousLastSeenPostNo ?? 0, options.since_post_no ?? 0);
+  const baseline = options.since_post_no ?? (options.ignore_state ? 0 : previousLastSeenPostNo ?? 0);
 
   const matchingPosts = items
     .filter((item) => getListItemCollectionNo(item) === options.collection_no)
@@ -152,4 +153,3 @@ export function filterLiveSeriesTitleContainsPosts(
     posts,
   };
 }
-
